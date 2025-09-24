@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>JonAvionics</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="WebSocketSharp-netstandard" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Reference to the managed SimConnect DLL.
+      IMPORTANT: You MUST verify that this path is correct for your system!
+    -->
+    <Reference Include="Microsoft.FlightSimulator.SimConnect">
+      <HintPath>C:\MSFS SDK\SimConnect SDK\lib\managed\Microsoft.FlightSimulator.SimConnect.dll</HintPath>
+      <!-- THIS IS THE CRITICAL INSTRUCTION: It tells the build to copy the DLL to the output folder -->
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    This is a "Post-Build Event". After the code compiles successfully, this command
+    will run. It copies the native SimConnect.dll to your output directory, which
+    is often required by the managed wrapper to function correctly at runtime.
+    IMPORTANT: You MUST also verify this path is correct!
+  -->
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="copy &quot;C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll&quot; &quot;$(TargetDir)&quot;" />
+  </Target>
+
+</Project>

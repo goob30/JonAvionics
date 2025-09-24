@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FBW MCDU Live Viewer</title>
+    <style>
+        @font-face { font-family: 'HoneywellMCDU'; src: url('fonts/HoneywellMCDU.ttf') format('truetype'); }
+        @font-face { font-family: 'HoneywellMCDUSmall'; src: url('fonts/HoneywellMCDUSmall.ttf') format('truetype'); }
+        :root { --mcdu-width: 1000px; --mcdu-height: 860px; --mcdu-font-size: 38px; --mcdu-letter-spacing: -1px; }
+        body { font-family: 'HoneywellMCDU', 'Consolas', monospace; background-color: #1e1e1e; color: #d4d4d4; }
+        #mcdu-screen { background-color: #000; border: 5px solid #444; padding: 20px; width: var(--mcdu-width); height: var(--mcdu-height); display: flex; flex-direction: column; font-size: var(--mcdu-font-size); letter-spacing: var(--mcdu-letter-spacing); -webkit-font-smoothing: none; -moz-osx-font-smoothing: grayscale; }
+        .line { line-height: 1.35; white-space: pre; display: grid; grid-template-columns: 1fr 1fr 1fr; width: 100%; }
+        .line-left { text-align: left; } .line-center { text-align: center; } .line-right { text-align: right; }
+        .cell { display: inline; } .cell.small { font-family: 'HoneywellMCDUSmall'; }
+        .cell.white { color: #E5E5E5; } .cell.green { color: #33FF33; } .cell.amber { color: #FFB833; } .cell.cyan { color: #00FFFF; } .cell.magenta { color: #FF00FF; } .cell.red { color: #FF0000; }
+        #title { text-align: center; font-weight: bold; padding-bottom: 0.5em; line-height: 1.35; }
+        #scratchpad { border-top: 1px solid #444; margin-top: auto; padding-top: 0.5em; text-align: left; line-height: 1.35; }
+    </style>
+</head>
+<body>
+    <h1>FBW MCDU Live Viewer</h1>
+    <div id="status">Connecting...</div>
+    <div id="mcdu-screen">
+        <div id="title"></div>
+        <div id="lines-container"></div>
+        <div id="scratchpad"></div>
+    </div>
+    <script>
+        const statusDiv = document.getElementById('status');
+        const titleDiv = document.getElementById('title');
+        const linesContainer = document.getElementById('lines-container');
+        const scratchpadDiv = document.getElementById('scratchpad');
+        const socket = new WebSocket('ws://10.0.0.91:8381/mcdu');
+        socket.onopen = (e) => { statusDiv.textContent = 'Connected to C# Server'; statusDiv.style.color = 'lightgreen'; };
+        socket.onmessage = (event) => renderMCDU(JSON.parse(event.data));
+        socket.onclose = (event) => { statusDiv.textContent = 'Disconnected from C# Server'; statusDiv.style.color = 'red'; };
+        socket.onerror = (error) => { statusDiv.textContent = `Connection Error: Check Console`; statusDiv.style.color = 'red'; };
+        function renderMCDU(data) {
+            titleDiv.textContent = data.Title;
+            linesContainer.innerHTML = '';
+            const renderCells = (cells) => {
+                let html = '';
+                if (!cells) return html;
+                cells.forEach(cell => { html += `<span class="cell ${cell.color} ${cell.size}">${cell.text.replace(/ /g, '&nbsp;')}</span>`; });
+                return html;
+            };
+            data.Lines.forEach(lineData => {
+                const lineEl = document.createElement('div');
+                lineEl.className = 'line';
+                const leftEl = document.createElement('div');
+                leftEl.className = 'line-left';
+                leftEl.innerHTML = renderCells(lineData.Left);
+                const centerEl = document.createElement('div');
+                centerEl.className = 'line-center';
+                centerEl.innerHTML = renderCells(lineData.Center);
+                const rightEl = document.createElement('div');
+                rightEl.className = 'line-right';
+                rightEl.innerHTML = renderCells(lineData.Right);
+                lineEl.appendChild(leftEl);
+                lineEl.appendChild(centerEl);
+                lineEl.appendChild(rightEl);
+                linesContainer.appendChild(lineEl);
+            });
+            scratchpadDiv.innerHTML = renderCells(data.Scratchpad);
+        }
+    </script>
+</body>
+</html>
