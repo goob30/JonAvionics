@@ -21,8 +21,6 @@ namespace JonAvionics.providers
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     struct PmdgCduScreen
     {
-        // SDK shows this as a 2D array: Cells[x][y] where x=columns, y=rows
-        // But in C# we need to marshal it as a 1D array and access it correctly
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 24 * 14)]
         public PmdgCduCell[] Cells;
 
@@ -47,10 +45,9 @@ namespace JonAvionics.providers
             {3, "magenta"}, {4, "amber"}, {5, "red"}
         };
 
-        // SDK constants from the documentation
         private const byte PMDG_NG3_CDU_FLAG_SMALL_FONT = 0x01;
-        private const int CDU_COLUMNS = 24;  // CDU_COLUMNS from SDK
-        private const int CDU_ROWS = 14;     // CDU_ROWS from SDK
+        private const int CDU_COLUMNS = 24;
+        private const int CDU_ROWS = 14;
 
         public async System.Threading.Tasks.Task Start()
         {
@@ -149,14 +146,22 @@ namespace JonAvionics.providers
             }
         }
 
-        // Helper method to access 2D array stored as 1D - following SDK pattern
+        // Maps PMDG CDU symbols into Unicode characters
+        private static char MapPmdgSymbol(byte symbol)
+        {
+            return symbol switch
+            {
+                0xEA => '□', // empty box
+                0xB0 => '°', // degree symbol
+                _ => (symbol >= 32 && symbol <= 126) ? (char)symbol : ' '
+            };
+        }
+
         private PmdgCduCell GetCduCell(PmdgCduCell[] cells, int x, int y)
         {
-            // SDK uses Cells[x][y] where x=column, y=row
-            // In a 1D array, this translates to: index = x * CDU_ROWS + y
             int index = x * CDU_ROWS + y;
             if (index < 0 || index >= cells.Length)
-                return new PmdgCduCell(); // Return empty cell if out of bounds
+                return new PmdgCduCell();
             return cells[index];
         }
 
@@ -172,55 +177,47 @@ namespace JonAvionics.providers
             }
 
             var lines = new List<Line>();
-            
-            // Process each row following the SDK pattern
-            for (int y = 0; y < CDU_ROWS - 1; y++) // Exclude last row (scratchpad)
+
+            for (int y = 0; y < CDU_ROWS - 1; y++)
             {
                 var rowCells = new List<Cell>();
-                var rowChars = new List<char>(); // For debug output
-                
-                // Process each column in this row
+                var rowChars = new List<char>();
+
                 for (int x = 0; x < CDU_COLUMNS; x++)
                 {
                     var cduCell = GetCduCell(screenData.Cells, x, y);
-                    
-                    // Character mapping - keep it simple for now
-                    char ch = cduCell.Symbol >= 32 && cduCell.Symbol <= 126 ? 
-                             (char)cduCell.Symbol : ' ';
-                    
+
+
+                    char ch = MapPmdgSymbol(cduCell.Symbol);
                     string color = ColorMap.GetValueOrDefault(cduCell.Color, "white");
-                    string size = (cduCell.Flags & PMDG_NG3_CDU_FLAG_SMALL_FONT) != 0 ? 
-                                 "small" : "normal";
+                    string size = (cduCell.Flags & PMDG_NG3_CDU_FLAG_SMALL_FONT) != 0 ? "small" : "normal";
 
                     rowCells.Add(new Cell(ch.ToString(), color, size));
                     rowChars.Add(ch);
+                    
                 }
 
-                // Create line with full 24-character row
                 lines.Add(new Line
                 {
-                    Left = rowCells,           // Full line in Left for compatibility
-                    Center = new List<Cell>(), // Empty
-                    Right = new List<Cell>()   // Empty
+                    Left = rowCells,
+                    Center = new List<Cell>(),
+                    Right = new List<Cell>()
                 });
 
-                // Debug output to see exact row content
                 var rowText = new string(rowChars.ToArray());
                 Console.WriteLine($"PMDG Debug - Row {y:D2}: [{rowText}]");
+                
             }
 
-            // Handle scratchpad (last row)
             var scratchCells = new List<Cell>();
             var scratchChars = new List<char>();
-            
+
             for (int x = 0; x < CDU_COLUMNS; x++)
             {
                 var cduCell = GetCduCell(screenData.Cells, x, CDU_ROWS - 1);
-                char ch = cduCell.Symbol >= 32 && cduCell.Symbol <= 126 ? 
-                         (char)cduCell.Symbol : ' ';
+                char ch = MapPmdgSymbol(cduCell.Symbol);
                 string color = ColorMap.GetValueOrDefault(cduCell.Color, "white");
-                string size = (cduCell.Flags & PMDG_NG3_CDU_FLAG_SMALL_FONT) != 0 ? 
-                             "small" : "normal";
+                string size = (cduCell.Flags & PMDG_NG3_CDU_FLAG_SMALL_FONT) != 0 ? "small" : "normal";
 
                 scratchCells.Add(new Cell(ch.ToString(), color, size));
                 scratchChars.Add(ch);
@@ -229,11 +226,11 @@ namespace JonAvionics.providers
             var scratchText = new string(scratchChars.ToArray());
             Console.WriteLine($"PMDG Debug - Scratchpad: [{scratchText}]");
 
-            return new McduState 
-            { 
-                Title = "PMDG CDU", 
-                Lines = lines, 
-                Scratchpad = scratchCells 
+            return new McduState
+            {
+                Title = "PMDG CDU",
+                Lines = lines,
+                Scratchpad = scratchCells
             };
         }
     }

@@ -17,3 +17,4 @@ C:\Users\User\Documents\VSCodeProjects\cs\JonAvionics\obj\Debug\net8.0\refint\Jo
 C:\Users\User\Documents\VSCodeProjects\cs\JonAvionics\obj\Debug\net8.0\JonAvionics.pdb
 C:\Users\User\Documents\VSCodeProjects\cs\JonAvionics\obj\Debug\net8.0\JonAvionics.genruntimeconfig.cache
 C:\Users\User\Documents\VSCodeProjects\cs\JonAvionics\obj\Debug\net8.0\ref\JonAvionics.dll
+C:\Users\User\Documents\VSCodeProjects\cs\JonAvionics\obj\Debug\net8.0\JonAvionics.sourcelink.json
