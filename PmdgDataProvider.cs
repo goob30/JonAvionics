@@ -151,7 +151,7 @@ namespace JonAvionics.providers
         {
             return symbol switch
             {
-                0xEA => '□', // empty box
+                0xEA => '▯', // empty box
                 0xB0 => '°', // degree symbol
                 _ => (symbol >= 32 && symbol <= 126) ? (char)symbol : ' '
             };
