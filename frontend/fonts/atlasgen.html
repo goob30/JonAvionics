@@ -1,0 +1,251 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CDU Atlas Generator</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#111; color:#ddd; padding:16px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    canvas { background:#000; border:1px solid #333; image-rendering: pixelated; }
+    button, input { padding:8px 10px; }
+    textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    pre { background:#000; border:1px solid #333; padding:12px; overflow:auto; max-height: 300px; }
+  </style>
+</head>
+<body>
+  <h2>CDU Atlas Generator (TTF → PNG + JSON)</h2>
+
+  <div class="row">
+    <label>Large TTF: <input id="ttfLarge" type="file" accept=".ttf,.otf" /></label>
+    <label>Small TTF: <input id="ttfSmall" type="file" accept=".ttf,.otf" /></label>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <label>Cell W <input id="cellW" type="number" value="24" style="width:70px;"></label>
+    <label>Cell H <input id="cellH" type="number" value="32" style="width:70px;"></label>
+    <label>Cols <input id="cols" type="number" value="16" style="width:70px;"></label>
+
+    <label>Large px <input id="largePx" type="number" value="30" style="width:70px;"></label>
+    <label>Large baseline <input id="largeBase" type="number" value="25" style="width:90px;"></label>
+
+    <label>Small px <input id="smallPx" type="number" value="18" style="width:70px;"></label>
+    <label>Small baseline <input id="smallBase" type="number" value="23" style="width:90px;"></label>
+    <label>Small Y scale <input id="smallYScale" type="number" value="0.85" step="0.01" style="width:90px;"></label>
+
+    <label>Alpha cutoff <input id="alphaCutoff" type="number" value="128" min="0" max="255" style="width:90px;"></label>
+  </div>
+
+  <p style="opacity:.85; margin-top:10px;">
+    Charset should match what PMDG sends. Start with ASCII + CDU symbols you see (°, /, %, &lt;, &gt;, -, etc.).
+    The “box” placeholder is not in the font; we draw it ourselves at runtime.
+  </p>
+
+  <div class="row">
+    <label>Charset:<br>
+      <textarea id="charset" rows="6" cols="80" style="background:#000;color:#ddd;border:1px solid #333;padding:8px;"> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°</textarea>
+    </label>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <button id="gen">Generate Atlases</button>
+  </div>
+
+  <h3>Preview</h3>
+  <div class="row">
+    <div>
+      <div>Large atlas preview</div>
+      <canvas id="prevLarge"></canvas>
+    </div>
+    <div>
+      <div>Small atlas preview</div>
+      <canvas id="prevSmall"></canvas>
+    </div>
+  </div>
+
+  <h3>JSON preview (maps)</h3>
+  <pre id="out"></pre>
+
+  <script>
+    // This bakes TTF → bitmap atlas. Runtime draws the bitmap, NOT fonts.
+    // Goals:
+    // - Prevent bleed between cells: hard clip each cell
+    // - Remove semi-transparent edges: alpha threshold to 0/255 (Pico-safe)
+    // - PMDG-like small: lower baseline + vertical squish baked in
+
+    function thresholdAlpha(ctx, x, y, w, h, cutoff = 128) {
+      const img = ctx.getImageData(x, y, w, h);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        d[i + 3] = d[i + 3] >= cutoff ? 255 : 0;
+      }
+      ctx.putImageData(img, x, y);
+    }
+
+    function fileToFontFace(file, familyName) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const fontFace = new FontFace(familyName, reader.result);
+            await fontFace.load();
+            document.fonts.add(fontFace);
+            resolve(fontFace);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function makeAtlas({ family, px, baselineY, cellW, cellH, cols, charset, yScale = 1.0, alphaCutoff = 128 }) {
+      const chars = Array.from(new Set(Array.from(charset))); // unique
+      const rows = Math.ceil(chars.length / cols);
+
+      const atlas = document.createElement('canvas');
+      atlas.width = cols * cellW;
+      atlas.height = rows * cellH;
+
+      const ctx = atlas.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, atlas.width, atlas.height);
+
+      ctx.fillStyle = '#fff';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = `${px}px "${family}"`;
+
+      // Keep bitmap crisp
+      ctx.imageSmoothingEnabled = false;
+
+      const map = {};
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x0 = col * cellW;
+        const y0 = row * cellH;
+
+        // Clear cell
+        ctx.clearRect(x0, y0, cellW, cellH);
+
+        // Measure width (no transforms applied yet)
+        const metrics = ctx.measureText(ch);
+        const glyphW = Math.ceil(metrics.width);
+
+        // Center-ish horizontally (cell-local coords)
+        const localDrawX = Math.floor((cellW - glyphW) / 2);
+
+        // HARD CLIP to this cell so NOTHING bleeds into the next row/cell
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x0, y0, cellW, cellH);
+        ctx.clip();
+
+        // Move origin into this cell
+        ctx.translate(x0, y0);
+
+        // Vertical squish (small font usually)
+        // Important: after scaling Y, divide baseline by yScale so baseline lands where requested.
+        ctx.scale(1, yScale);
+
+        const localDrawY = baselineY / yScale;
+
+        // Draw
+        ctx.fillText(ch, localDrawX, localDrawY);
+
+        // Restore to atlas coords
+        ctx.restore();
+
+        // Remove any semi-transparent edge pixels (Pico-safe)
+        thresholdAlpha(ctx, x0, y0, cellW, cellH, alphaCutoff);
+
+        map[ch] = { x: x0, y: y0, w: cellW, h: cellH, px, baselineY, yScale, alphaCutoff };
+      }
+
+      return { atlas, map };
+    }
+
+    function downloadBlob(name, blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    document.getElementById('gen').onclick = async () => {
+      const ttfLarge = document.getElementById('ttfLarge').files[0];
+      const ttfSmall = document.getElementById('ttfSmall').files[0];
+      if (!ttfLarge || !ttfSmall) {
+        alert('Pick both Large and Small TTF files first.');
+        return;
+      }
+
+      const cellW = parseInt(document.getElementById('cellW').value, 10);
+      const cellH = parseInt(document.getElementById('cellH').value, 10);
+      const cols = parseInt(document.getElementById('cols').value, 10);
+
+      const largePx = parseInt(document.getElementById('largePx').value, 10);
+      const smallPx = parseInt(document.getElementById('smallPx').value, 10);
+
+      const largeBase = parseInt(document.getElementById('largeBase').value, 10);
+      const smallBase = parseInt(document.getElementById('smallBase').value, 10);
+
+      const smallYScale = parseFloat(document.getElementById('smallYScale').value);
+      const alphaCutoff = parseInt(document.getElementById('alphaCutoff').value, 10);
+
+      const charset = document.getElementById('charset').value;
+
+      await fileToFontFace(ttfLarge, 'CDU_Large_TTF');
+      await fileToFontFace(ttfSmall, 'CDU_Small_TTF');
+
+      const large = makeAtlas({
+        family: 'CDU_Large_TTF',
+        px: largePx,
+        baselineY: largeBase,
+        cellW, cellH, cols, charset,
+        yScale: 1.0,
+        alphaCutoff
+      });
+
+      const small = makeAtlas({
+        family: 'CDU_Small_TTF',
+        px: smallPx,
+        baselineY: smallBase,
+        cellW, cellH, cols, charset,
+        yScale: smallYScale,
+        alphaCutoff
+      });
+
+      // Preview
+      const prevL = document.getElementById('prevLarge');
+      prevL.width = large.atlas.width; prevL.height = large.atlas.height;
+      prevL.getContext('2d').imageSmoothingEnabled = false;
+      prevL.getContext('2d').drawImage(large.atlas, 0, 0);
+
+      const prevS = document.getElementById('prevSmall');
+      prevS.width = small.atlas.width; prevS.height = small.atlas.height;
+      prevS.getContext('2d').imageSmoothingEnabled = false;
+      prevS.getContext('2d').drawImage(small.atlas, 0, 0);
+
+      // Download
+      large.atlas.toBlob(b => downloadBlob('cdu_atlas_large.png', b), 'image/png');
+      small.atlas.toBlob(b => downloadBlob('cdu_atlas_small.png', b), 'image/png');
+
+      downloadBlob('cdu_map_large.json', new Blob([JSON.stringify(large.map, null, 2)], { type: 'application/json' }));
+      downloadBlob('cdu_map_small.json', new Blob([JSON.stringify(small.map, null, 2)], { type: 'application/json' }));
+
+      document.getElementById('out').textContent =
+        'Generated: cdu_atlas_large.png + cdu_map_large.json\n' +
+        'Generated: cdu_atlas_small.png + cdu_map_small.json\n\n' +
+        'Tuning notes:\n' +
+        '- If small text is too high: increase Small baseline (e.g. 24)\n' +
+        '- If small looks too squished: increase Small Y scale (e.g. 0.88)\n' +
+        '- If edges are too thin: lower Alpha cutoff (e.g. 110)\n\n' +
+        'Large map sample:\n' +
+        JSON.stringify(Object.fromEntries(Object.entries(large.map).slice(0, 10)), null, 2);
+    };
+  </script>
+</body>
+</html>

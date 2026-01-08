@@ -1,149 +1,265 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>PMDG CDU Live Viewer</title>
-    <style>
-        @font-face { font-family: 'HoneywellMCDU'; src: url('fonts/HoneywellMCDU.ttf') format('truetype'); }
-        @font-face { font-family: 'HoneywellMCDUSmall'; src: url('fonts/HoneywellMCDUSmall.ttf') format('truetype'); }
+  <meta charset="UTF-8" />
+  <title>PMDG CDU Live Viewer</title>
+  <style>
+    :root {
+      --cdu-w: 640px;
+      --cdu-h: 480px;
+      --border: 2px;
+      --pad: 0px;
+    }
 
-        :root {
-            /* === SIZE AND SPACING VARIABLES: Edit these to tune the look === */
-            --mcdu-width: 1000px;
-            --mcdu-height: 860px;
-            
-            /* Increase font size to better fill the larger screen */
-            --mcdu-font-size: 60px;
-            --mcdu-letter-spacing: -2px;
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-            /* This now controls the vertical spacing between each line */
-            --mcdu-line-height: 1; 
-        }
+    #status { margin-top: 8px; }
 
-        body { 
-            font-family: 'HoneywellMCDU', 'Consolas', 'Courier New', monospace; 
-            background-color: #1e1e1e; 
-            color: #d4d4d4; 
-        }
-        
-        #mcdu-screen {
-            background-color: #000;
-            border: 5px solid #444;
-            padding: 25px;
-            width: var(--mcdu-width);
-            height: var(--mcdu-height);
-            display: flex;
-            flex-direction: column;
-            font-size: var(--mcdu-font-size);
-            letter-spacing: var(--mcdu-letter-spacing);
-            -webkit-font-smoothing: none;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        
-        .line {
-            line-height: var(--mcdu-line-height); /* Apply consistent vertical spacing */
-            white-space: pre;
-            display: grid;
-            grid-template-columns: 45% 10% 45%; /* Use a grid for stable horizontal alignment */
-            width: 100%;
-        }
+    #mcdu-screen-container {
+      background: #000;
+      border: var(--border) solid #444;
+      padding: var(--pad);
+      box-sizing: border-box;
+      margin-top: 16px;
+      width: calc(var(--cdu-w) + (var(--pad) * 2) + (var(--border) * 2));
+      height: calc(var(--cdu-h) + (var(--pad) * 2) + (var(--border) * 2));
+    }
 
-        .line-left   { text-align: left; }
-        .line-center { text-align: center; }
-        .line-right  { text-align: right; }
-        
-        #lines-container {
-             /* This container no longer needs special flex rules. Lines will stack naturally. */
-        }
-
-        .cell {
-            display: inline;
-            font-family: 'HoneywellMCDU', 'Segoe UI Symbol', 'Consolas', 'Courier New', monospace;
-            letter-spacing: var(--mcdu-letter-spacing);
-        }
-
-        /* For fallback symbols like □ */
-        .cell.box {
-            font-family: 'Segoe UI Symbol', 'Consolas', 'Courier New', monospace; /* force fallback */
-            letter-spacing: -6px; /* tighten just this symbol */
-            font-size: 0.9em;
-        }
-
-
-        .cell.small { font-family: 'HoneywellMCDUSmall'; }
-        .cell.white { color: #E5E5E5; }
-        .cell.green { color: #33FF33; }
-        .cell.amber { color: #FFB833; }
-        .cell.cyan { color: #00FFFF; }
-        .cell.magenta { color: #FF00FF; }
-        .cell.red { color: #FF0000; }
-        
-        
-        #title { 
-            text-align: center; 
-            font-weight: bold; 
-            padding-bottom: 0.5em;
-            line-height: var(--mcdu-line-height);
-        }
-        
-        #scratchpad { 
-            /* REMOVED 'margin-top: auto' to allow natural stacking */
-            padding-top: 0.5em;
-            text-align: left;
-            line-height: var(--mcdu-line-height);
-        }
-    </style>
+    canvas {
+      display: block;
+      width: var(--cdu-w);
+      height: var(--cdu-h);
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      image-rendering: -moz-crisp-edges;
+    }
+  </style>
 </head>
 <body>
-    <h1>PMDG CDU Live Viewer</h1>
-    <div id="status">Connecting...</div>
-    <div id="mcdu-screen">
-        <div id="lines-container"></div>
-        <div id="scratchpad"></div>
-    </div>
+  <h1>PMDG CDU Live Viewer</h1>
+  <div id="status">Loading glyph atlases…</div>
 
-    <script>
-        // No changes needed to the JavaScript. It's doing its job correctly.
-        const statusDiv = document.getElementById('status');
-        const linesContainer = document.getElementById('lines-container');
-        const scratchpadDiv = document.getElementById('scratchpad');
-        const socket = new WebSocket('ws://localhost:8381/mcdu');
-        socket.onopen = (e) => { statusDiv.textContent = 'Connected to C# Server'; statusDiv.style.color = 'lightgreen'; };
-        socket.onmessage = (event) => renderMCDU(JSON.parse(event.data));
-        socket.onclose = (event) => { statusDiv.textContent = 'Disconnected from C# Server'; statusDiv.style.color = 'red'; };
-        socket.onerror = (error) => { statusDiv.textContent = `Connection Error: Check Console`; statusDiv.style.color = 'red'; };
-        function renderMCDU(data) {
-            linesContainer.innerHTML = '';
-            const renderCells = (cells) => {
-                let html = '';
-                if (!cells) return html;
-                cells.forEach(cell => {
-                    let extraClass = "";
-                    if (cell.text === "□") extraClass = " box";
-                    html += `<span class="cell ${cell.color} ${cell.size}${extraClass}">${cell.text.replace(/ /g, '&nbsp;')}</span>`;
-                });
+  <div id="mcdu-screen-container">
+    <canvas id="cdu" width="640" height="480"></canvas>
+  </div>
 
-                return html;
-            };
-            data.Lines.forEach(lineData => {
-                const lineEl = document.createElement('div');
-                lineEl.className = 'line';
-                const leftEl = document.createElement('div');
-                leftEl.className = 'line-left';
-                leftEl.innerHTML = renderCells(lineData.Left);
-                const centerEl = document.createElement('div');
-                centerEl.className = 'line-center';
-                centerEl.innerHTML = renderCells(lineData.Center);
-                const rightEl = document.createElement('div');
-                rightEl.className = 'line-right';
-                rightEl.innerHTML = renderCells(lineData.Right);
-                lineEl.appendChild(leftEl);
-                lineEl.appendChild(centerEl);
-                lineEl.appendChild(rightEl);
-                linesContainer.appendChild(lineEl);
-            });
-            scratchpadDiv.innerHTML = renderCells(data.Scratchpad);
+  <script>
+    // === CDU GEOMETRY (fixed grid) ===
+    const CELL_W = 24;
+    const CELL_H = 32;
+    const COLS = 24;
+    const MAIN_ROWS = 13;   // PMDG Lines
+    const SCRATCH_ROW = 13; // row index for scratchpad (15th row)
+
+    // Center the 24*24=576px grid horizontally in 640px
+    const GRID_W = COLS * CELL_W;        // 576
+    const GRID_X0 = Math.floor((640 - GRID_W) / 2); // 32
+    const GRID_H = (MAIN_ROWS + 1) * CELL_H;     // 14 rows total
+    const GRID_Y0 = Math.floor((480 - GRID_H) / 2);
+
+
+    const colorMap = {
+      white:   '#FFFFFF',
+      green:   '#33FF33',
+      amber:   '#FFB833',
+      cyan:    '#00FFFF',
+      magenta: '#FF00FF',
+      red:     '#FF0000'
+    };
+
+    // === Assets (generated by atlasgen.html) ===
+    const LARGE_MAP_URL   = 'fonts/cdu_map_large.json';
+    const LARGE_ATLAS_URL = 'fonts/cdu_atlas_large.png';
+    const SMALL_MAP_URL   = 'fonts/cdu_map_small.json';
+    const SMALL_ATLAS_URL = 'fonts/cdu_atlas_small.png';
+
+    const statusDiv = document.getElementById('status');
+    const canvas = document.getElementById('cdu');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    // Offscreen canvas for tinting
+    const stamp = document.createElement('canvas');
+    const sctx = stamp.getContext('2d');
+
+    let largeMap = null;
+    let smallMap = null;
+    let largeAtlas = null;
+    let smallAtlas = null;
+    let ready = false;
+
+    function loadImage(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image: ' + url));
+        img.src = url;
+      });
+    }
+
+    async function loadJSON(url) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Failed to fetch ' + url);
+      return await r.json();
+    }
+
+    async function initialize() {
+      try {
+        [largeMap, smallMap] = await Promise.all([
+          loadJSON(LARGE_MAP_URL),
+          loadJSON(SMALL_MAP_URL),
+        ]);
+
+        [largeAtlas, smallAtlas] = await Promise.all([
+          loadImage(LARGE_ATLAS_URL),
+          loadImage(SMALL_ATLAS_URL),
+        ]);
+
+        ready = true;
+        statusDiv.textContent = 'Glyphs loaded. Connecting…';
+        statusDiv.style.color = '#d4d4d4';
+        connectWebSocket();
+      } catch (e) {
+        console.error(e);
+        statusDiv.textContent = 'Init error: ' + e.message;
+        statusDiv.style.color = 'red';
+      }
+    }
+
+    // === Drawing helpers ===
+
+    function clearScreen() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawBox(x, y, colorName) {
+      // PMDG-like placeholder box within a 24x32 cell
+      ctx.strokeStyle = colorMap[colorName] || colorMap.white;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 4, y + 8, CELL_W - 8, CELL_H - 16);
+    }
+
+    function stampTintedGlyph(atlasImg, glyphRect, colorName, dstX, dstY) {
+      const { x, y, w, h } = glyphRect;
+
+      // Prepare stamp
+      stamp.width = w;
+      stamp.height = h;
+      sctx.clearRect(0, 0, w, h);
+
+      // Draw glyph (white) into stamp
+      sctx.imageSmoothingEnabled = false;
+      sctx.drawImage(atlasImg, x, y, w, h, 0, 0, w, h);
+
+      // Tint
+      sctx.globalCompositeOperation = 'source-in';
+      sctx.fillStyle = colorMap[colorName] || colorMap.white;
+      sctx.fillRect(0, 0, w, h);
+      sctx.globalCompositeOperation = 'source-over';
+
+      // Blit to main
+      ctx.drawImage(stamp, dstX, dstY);
+    }
+
+    function drawCell(cell, col, row) {
+      if (!cell) return;
+
+      const ch = cell.text ?? ' ';
+      if (ch === ' ' || ch === '\u00A0') return;
+
+      const colorName = cell.color || 'white';
+      const size = cell.size || 'normal';
+
+      const x = GRID_X0 + (col * CELL_W);
+      const y = GRID_Y0 + (row * CELL_H);
+
+      // Box placeholder: not in the font, draw explicitly
+      if (ch === '▯' || ch === '□') {
+        drawBox(x, y, colorName);
+        return;
+      }
+
+      const map = (size === 'small') ? smallMap : largeMap;
+      const atlas = (size === 'small') ? smallAtlas : largeAtlas;
+
+      const rect = map[ch];
+      if (!rect) return; // glyph not in atlas
+
+      // Note: rect is already a fixed 24x32 cell from the atlas generator.
+      // We stamp exactly that cell.
+      stampTintedGlyph(atlas, rect, colorName, x, y);
+    }
+
+    function renderMCDU(data) {
+      if (!ready) return;
+
+      clearScreen();
+
+      // Lines: treat each row as one contiguous 24-col line
+      if (Array.isArray(data.Lines)) {
+        data.Lines.forEach((lineData, rowIndex) => {
+          if (rowIndex >= MAIN_ROWS) return;
+
+          const allCells = []
+            .concat(lineData.Left || [])
+            .concat(lineData.Center || [])
+            .concat(lineData.Right || []);
+
+          // Render up to 24 columns, ignore extra
+          for (let col = 0; col < COLS; col++) {
+            drawCell(allCells[col], col, rowIndex);
+          }
+        });
+      }
+
+      // Scratchpad row
+      if (Array.isArray(data.Scratchpad)) {
+        for (let col = 0; col < COLS; col++) {
+          drawCell(data.Scratchpad[col], col, SCRATCH_ROW);
         }
-    </script>
+      }
+    }
+
+    // === WebSocket ===
+
+    function connectWebSocket() {
+      const socket = new WebSocket('ws://localhost:8381/mcdu');
+
+      socket.onopen = () => {
+        statusDiv.textContent = 'Connected to C# Server';
+        statusDiv.style.color = 'lightgreen';
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          renderMCDU(JSON.parse(event.data));
+        } catch (e) {
+          console.error('Bad JSON:', e);
+        }
+      };
+
+      socket.onclose = () => {
+        statusDiv.textContent = 'Disconnected. Reconnecting in 3s…';
+        statusDiv.style.color = 'red';
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      socket.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        statusDiv.textContent = 'Connection Error. Check console.';
+        statusDiv.style.color = 'red';
+        try { socket.close(); } catch {}
+      };
+    }
+
+    initialize();
+  </script>
 </body>
 </html>
