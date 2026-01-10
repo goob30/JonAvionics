@@ -13,10 +13,10 @@ namespace JonAvionics.providers
     // If these already exist elsewhere, remove duplicates here.
     public class McduState
     {
-        public string Title { get; set; } = "";
-        public List<List<Cell>> Grid { get; set; } = new();     // 12 rows x 24 cols
-        public List<Cell> Scratchpad { get; set; } = new();     // 24 cols
-        public List<Line> Lines { get; set; } = new();          // compatibility (unused)
+        public string Title { get; set; } = "";              // kept, but title is also emitted as Grid[0]
+        public List<List<Cell>> Grid { get; set; } = new();   // Grid[0] = title row, Grid[1..12] = data rows
+        public List<Cell> Scratchpad { get; set; } = new();   // 24 cells
+        public List<Line> Lines { get; set; } = new();        // compatibility (unused)
     }
 
     public class Line
@@ -46,10 +46,14 @@ namespace JonAvionics.providers
 
         private const string SimBridgeUri = "ws://localhost:8380/interfaces/v1/mcdu";
 
-        // Output contract for your HTML:
-        // Title (string) + 12 rows (Grid) + 1 scratchpad row (Scratchpad)
         private const int CDU_COLS = 24;
-        private const int GRID_ROWS = 12;
+
+        // Output format you asked for:
+        //   Grid[0]      = title row (normal)
+        //   Grid[1..12]  = 12 content rows
+        //   Scratchpad   = scratch row (normal)
+        private const int TITLE_ROWS = 1;
+        private const int CONTENT_ROWS = 12;
 
         private const bool DEBUG_PRINT_ROWS = true;
 
@@ -99,13 +103,12 @@ namespace JonAvionics.providers
 
                                 var raw = JObject.Parse(jsonString);
 
-                                // FBW usually has "left" and "right" MCDUs.
+                                // FBW usually has "left" and "right"
                                 var mcduData = raw["left"];
                                 if (mcduData == null) return;
 
                                 var state = ProcessFbwData(mcduData);
                                 var finalJson = JsonConvert.SerializeObject(state);
-
                                 OnDataReceived?.Invoke(finalJson);
                             }
                             catch (Exception ex)
@@ -117,7 +120,6 @@ namespace JonAvionics.providers
                         Console.WriteLine($"FBW Provider: Connecting to SimBridge at {SimBridgeUri}...");
                         ws.Connect();
 
-                        // Wait until open/close happens
                         await connectedTcs.Task;
 
                         while (ws.IsAlive)
@@ -144,71 +146,80 @@ namespace JonAvionics.providers
 
         private McduState ProcessFbwData(JToken mcduData)
         {
-            // Title as plain text (normal)
-            var title = string.Concat(
-                ParseSegment(mcduData.Value<string>("title") ?? "", "normal").Select(c => c.text)
-            ).Trim();
+            // Keep Title string for compatibility/debug
+            var rawTitleSegment = mcduData.Value<string>("title") ?? "";
+            var plainTitle = Plain(rawTitleSegment).Trim();
+            var titleRow = BuildCenteredTextRow(plainTitle, "white", "normal");
 
-            var grid = new List<List<Cell>>(GRID_ROWS);
+            var grid = new List<List<Cell>>(TITLE_ROWS + CONTENT_ROWS)
+            {
+                titleRow // Grid[0] = title row
+            };
+            if (DEBUG_PRINT_ROWS)
+            {
+                Console.WriteLine($"FBW Raw Title: \"{rawTitleSegment}\"");
+                Console.WriteLine($"FBW Plain Title: \"{Plain(rawTitleSegment)}\"");
+            }
+
+
+
 
             var linesParts = mcduData["lines"] as JArray;
-
-            // Always output 12 rows, even if lines missing
             if (linesParts == null)
             {
-                for (int i = 0; i < GRID_ROWS; i++)
-                    grid.Add(EmptyRow(RowSizeFor(i)));
+                // Still return title + blank rows so renderer stays stable
+                for (int i = 0; i < CONTENT_ROWS; i++)
+                    grid.Add(EmptyRow((i % 2 == 0) ? "small" : "normal"));
 
                 return new McduState
                 {
-                    Title = title,
+                    Title = plainTitle,
                     Grid = grid,
                     Scratchpad = FitTo24(ParseSegment(mcduData.Value<string>("scratchpad") ?? "", "normal"), "normal"),
                     Lines = new List<Line>()
                 };
             }
 
-            // Render up to 12, then pad to 12
-            var rowsToRender = Math.Min(linesParts.Count, GRID_ROWS);
-
-            for (int rowIdx = 0; rowIdx < rowsToRender; rowIdx++)
+            // Render exactly 12 content rows (even if SimBridge gives fewer)
+            for (int rowIdx = 0; rowIdx < CONTENT_ROWS; rowIdx++)
             {
-                var segments = linesParts[rowIdx]?.ToObject<List<string>>() ?? new List<string>();
+                var size = (rowIdx % 2 == 0) ? "small" : "normal";
 
+                if (rowIdx >= linesParts.Count)
+                {
+                    grid.Add(EmptyRow(size));
+                    continue;
+                }
+
+                var segments = linesParts[rowIdx]?.ToObject<List<string>>() ?? new List<string>();
                 var seg0 = segments.Count > 0 ? segments[0] ?? "" : "";
                 var seg1 = segments.Count > 1 ? segments[1] ?? "" : "";
                 var seg2 = segments.Count > 2 ? segments[2] ?? "" : "";
 
-                var size = RowSizeFor(rowIdx);
-
-                bool hasSeg1 = !string.IsNullOrWhiteSpace(Plain(seg1));
-                bool hasSeg2 = !string.IsNullOrWhiteSpace(Plain(seg2));
+                var hasSeg1 = !string.IsNullOrWhiteSpace(Plain(seg1));
+                var hasSeg2 = !string.IsNullOrWhiteSpace(Plain(seg2));
 
                 List<Cell> row;
 
-                // If seg1 and seg2 are empty, FBW sometimes pre-bakes the whole 24-col row in seg0 (using {sp}).
+                // If seg1 & seg2 are empty, FBW sometimes encodes full spacing into seg0 using {sp}
                 if (!hasSeg1 && !hasSeg2)
                 {
                     row = FitTo24(ParseSegment(seg0, size), size);
                 }
                 else
                 {
+                    // Your corrected mapping:
+                    // seg0 = left, seg1 = right, seg2 = center (and seg2 may be blank)
                     row = EmptyRow(size);
 
                     var cells0 = ParseSegment(seg0, size);
                     var cells1 = ParseSegment(seg1, size);
                     var cells2 = ParseSegment(seg2, size);
 
-                    // Your final correct mapping for FBW:
-                    // seg0 = left, seg1 = right, seg2 = center
                     PlaceLeft(row, cells0, 0);
                     PlaceRightAligned(row, cells1, CDU_COLS - 1);
                     PlaceCentered(row, cells2);
                 }
-
-                // Hard guarantee: exactly 24 cells
-                if (row.Count != CDU_COLS)
-                    row = FitTo24(row, size);
 
                 grid.Add(row);
 
@@ -221,7 +232,6 @@ namespace JonAvionics.providers
                     }
 
                     var rowStr = new string(row.Select(CellChar).ToArray());
-
                     Console.WriteLine($"FBW Row {rowIdx:00}: [{rowStr}]");
                     Console.WriteLine($"  seg0=\"{Plain(seg0)}\"");
                     Console.WriteLine($"  seg1=\"{Plain(seg1)}\"");
@@ -229,24 +239,16 @@ namespace JonAvionics.providers
                 }
             }
 
-            // Pad missing rows up to 12
-            for (int i = grid.Count; i < GRID_ROWS; i++)
-                grid.Add(EmptyRow(RowSizeFor(i)));
-
-            // Scratchpad: force 24 wide
             var scratch = FitTo24(ParseSegment(mcduData.Value<string>("scratchpad") ?? "", "normal"), "normal");
 
             return new McduState
             {
-                Title = title,
-                Grid = grid,           // 12 rows
-                Scratchpad = scratch,  // 24 cells
-                Lines = new List<Line>()
+                Title = plainTitle,
+                Grid = grid,
+                Scratchpad = scratch,
+                Lines = new List<Line>() // unused for FBW Grid mode
             };
         }
-
-        // Airbus convention: label rows often small; value rows big.
-        private static string RowSizeFor(int rowIdx) => (rowIdx % 2 == 0) ? "small" : "normal";
 
         private static List<Cell> EmptyRow(string size)
         {
@@ -263,6 +265,25 @@ namespace JonAvionics.providers
 
             for (int i = 0; i < CDU_COLS && i < cells.Count; i++)
                 row[i] = cells[i];
+
+            return row;
+        }
+
+        private static List<Cell> BuildCenteredTextRow(string text, string color, string size)
+        {
+            var row = EmptyRow(size);
+            if (string.IsNullOrEmpty(text)) return row;
+
+            var chars = text.ToCharArray();
+            int start = (CDU_COLS - chars.Length) / 2;
+            if (start < 0) start = 0;
+
+            for (int i = 0; i < chars.Length; i++)
+            {
+                int col = start + i;
+                if (col < 0 || col >= CDU_COLS) break;
+                row[col] = new Cell(chars[i].ToString(), color, size);
+            }
 
             return row;
         }
@@ -312,7 +333,6 @@ namespace JonAvionics.providers
         private static string Plain(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            // Convert {sp} to visible spaces for debug readability, then strip other tags.
             s = s.Replace("{sp}", " ", StringComparison.OrdinalIgnoreCase);
             return Regex.Replace(s, @"\{[\w/]*\}", "");
         }
@@ -323,7 +343,6 @@ namespace JonAvionics.providers
             var currentColor = "white";
             var currentSize = forceSize;
 
-            // Split into {tags} and text runs
             var matches = Regex.Matches(segment ?? "", @"(\{[\w/]*\})|([^\{]+)");
 
             foreach (Match match in matches)
@@ -332,8 +351,7 @@ namespace JonAvionics.providers
                 {
                     var tag = match.Groups[1].Value.Trim('{', '}');
 
-                    // {sp} is a *token* in FBW strings, not literal text.
-                    // It must emit a space cell.
+                    // {sp} must emit an actual space cell
                     if (tag.Equals("sp", StringComparison.OrdinalIgnoreCase))
                     {
                         cells.Add(new Cell(" ", currentColor, currentSize));
@@ -367,13 +385,11 @@ namespace JonAvionics.providers
                 {
                     var textRun = match.Groups[2].Value ?? "";
 
-                    // Normalize “boxes”
+                    // Normalize placeholder boxes
                     textRun = textRun.Replace("[]", "□");
 
                     foreach (var ch in textRun)
-                    {
                         cells.Add(new Cell(ch.ToString(), currentColor, currentSize));
-                    }
                 }
             }
 
