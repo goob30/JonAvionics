@@ -1,68 +1,245 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>FBW MCDU Live Viewer</title>
-    <style>
-        @font-face { font-family: 'HoneywellMCDU'; src: url('fonts/HoneywellMCDU.ttf') format('truetype'); }
-        @font-face { font-family: 'HoneywellMCDUSmall'; src: url('fonts/HoneywellMCDUSmall.ttf') format('truetype'); }
-        :root { --mcdu-width: 1000px; --mcdu-height: 860px; --mcdu-font-size: 38px; --mcdu-letter-spacing: -1px; }
-        body { font-family: 'HoneywellMCDU', 'Consolas', monospace; background-color: #1e1e1e; color: #d4d4d4; }
-        #mcdu-screen { background-color: #000; border: 5px solid #444; padding: 20px; width: var(--mcdu-width); height: var(--mcdu-height); display: flex; flex-direction: column; font-size: var(--mcdu-font-size); letter-spacing: var(--mcdu-letter-spacing); -webkit-font-smoothing: none; -moz-osx-font-smoothing: grayscale; }
-        .line { line-height: 1.35; white-space: pre; display: grid; grid-template-columns: 1fr 1fr 1fr; width: 100%; }
-        .line-left { text-align: left; } .line-center { text-align: center; } .line-right { text-align: right; }
-        .cell { display: inline; } .cell.small { font-family: 'HoneywellMCDUSmall'; }
-        .cell.white { color: #E5E5E5; } .cell.green { color: #33FF33; } .cell.amber { color: #FFB833; } .cell.cyan { color: #00FFFF; } .cell.magenta { color: #FF00FF; } .cell.red { color: #FF0000; }
-        #title { text-align: center; font-weight: bold; padding-bottom: 0.5em; line-height: 1.35; }
-        #scratchpad { border-top: 1px solid #444; margin-top: auto; padding-top: 0.5em; text-align: left; line-height: 1.35; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>FBW MCDU Live Viewer</title>
+  <style>
+    @font-face { font-family: 'HoneywellMCDU'; src: url('fonts/HoneywellMCDU.ttf') format('truetype'); }
+    @font-face { font-family: 'HoneywellMCDUSmall'; src: url('fonts/HoneywellMCDUSmall.ttf') format('truetype'); }
+
+    :root {
+      /* Hardware target */
+      --cdu-w: 640px;
+      --cdu-h: 480px;
+
+      /* Fixed grid geometry (match PMDG file) */
+      --cell-w: 24px;
+      --cell-h: 32px;
+      --cols: 24;
+
+      /* How many main rows you want visible (not counting scratchpad row).
+         If your provider sends 12 rows, set 12. If it sends 13, set 13. */
+      --main-rows: 13;
+
+      /* Cosmetic container */
+      --border: 2px;
+      --pad: 0px;
+
+      /* Font tuning inside 32px cells (adjust if you want tighter/looser) */
+      --font-large: 30px;
+      --font-small: 28px;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #status { margin-top: 8px; }
+
+    /* Same outer box idea as PMDG */
+    #mcdu-screen-container {
+      background: #000;
+      border: var(--border) solid #444;
+      padding: var(--pad);
+      box-sizing: border-box;
+      margin-top: 16px;
+
+      width: calc(var(--cdu-w) + (var(--pad) * 2) + (var(--border) * 2));
+      height: calc(var(--cdu-h) + (var(--pad) * 2) + (var(--border) * 2));
+
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* The centered pixel grid area (576px wide for 24*24) */
+    #grid-root {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: var(--cdu-w);
+      height: var(--cdu-h);
+      background: #000;
+    }
+
+    /* This holds exactly (main rows + scratch row) * 32px */
+    #grid {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: calc(var(--cols) * var(--cell-w));
+      user-select: none;
+
+      /* Important: disable smart font features that can shift spacing */
+      -webkit-font-smoothing: none;
+      -moz-osx-font-smoothing: grayscale;
+      font-kerning: none;
+      font-variant-ligatures: none;
+    }
+
+    /* Each row is a fixed pixel grid */
+    .row {
+      display: grid;
+      grid-template-columns: repeat(var(--cols), var(--cell-w));
+      grid-auto-rows: var(--cell-h);
+      height: var(--cell-h);
+    }
+
+    /* Each cell is exactly 24x32 pixels */
+    .cell {
+      width: var(--cell-w);
+      height: var(--cell-h);
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+
+      /* Keep text stable */
+      white-space: pre;
+      overflow: hidden;
+
+      font-family: 'HoneywellMCDU', Consolas, monospace;
+      font-size: var(--font-large);
+      line-height: var(--cell-h);
+
+      /* extra hardening */
+      font-kerning: none;
+      font-variant-ligatures: none;
+    }
+
+    .cell.small {
+      font-family: 'HoneywellMCDUSmall', 'HoneywellMCDU', Consolas, monospace;
+      font-size: var(--font-small);
+    }
+
+    /* Colors */
+    .cell.white   { color: #E5E5E5; }
+    .cell.green   { color: #33FF33; }
+    .cell.amber   { color: #FFB833; }
+    .cell.cyan    { color: #00FFFF; }
+    .cell.magenta { color: #FF00FF; }
+    .cell.red     { color: #FF0000; }
+  </style>
 </head>
 <body>
-    <h1>FBW MCDU Live Viewer</h1>
-    <div id="status">Connecting...</div>
-    <div id="mcdu-screen">
-        <div id="title"></div>
-        <div id="lines-container"></div>
-        <div id="scratchpad"></div>
+  <h1>FBW MCDU Live Viewer</h1>
+  <div id="status">Connecting...</div>
+
+  <div id="mcdu-screen-container">
+    <div id="grid-root">
+      <div id="grid"></div>
     </div>
-    <script>
-        const statusDiv = document.getElementById('status');
-        const titleDiv = document.getElementById('title');
-        const linesContainer = document.getElementById('lines-container');
-        const scratchpadDiv = document.getElementById('scratchpad');
-        const socket = new WebSocket('ws://10.0.0.91:8381/mcdu');
-        socket.onopen = (e) => { statusDiv.textContent = 'Connected to C# Server'; statusDiv.style.color = 'lightgreen'; };
-        socket.onmessage = (event) => renderMCDU(JSON.parse(event.data));
-        socket.onclose = (event) => { statusDiv.textContent = 'Disconnected from C# Server'; statusDiv.style.color = 'red'; };
-        socket.onerror = (error) => { statusDiv.textContent = `Connection Error: Check Console`; statusDiv.style.color = 'red'; };
-        function renderMCDU(data) {
-            titleDiv.textContent = data.Title;
-            linesContainer.innerHTML = '';
-            const renderCells = (cells) => {
-                let html = '';
-                if (!cells) return html;
-                cells.forEach(cell => { html += `<span class="cell ${cell.color} ${cell.size}">${cell.text.replace(/ /g, '&nbsp;')}</span>`; });
-                return html;
-            };
-            data.Lines.forEach(lineData => {
-                const lineEl = document.createElement('div');
-                lineEl.className = 'line';
-                const leftEl = document.createElement('div');
-                leftEl.className = 'line-left';
-                leftEl.innerHTML = renderCells(lineData.Left);
-                const centerEl = document.createElement('div');
-                centerEl.className = 'line-center';
-                centerEl.innerHTML = renderCells(lineData.Center);
-                const rightEl = document.createElement('div');
-                rightEl.className = 'line-right';
-                rightEl.innerHTML = renderCells(lineData.Right);
-                lineEl.appendChild(leftEl);
-                lineEl.appendChild(centerEl);
-                lineEl.appendChild(rightEl);
-                linesContainer.appendChild(lineEl);
-            });
-            scratchpadDiv.innerHTML = renderCells(data.Scratchpad);
+  </div>
+
+  <script>
+    // === Geometry (match your PMDG canvas layout) ===
+    const CDU_W = 640;
+    const CDU_H = 480;
+
+    const CELL_W = 24;
+    const CELL_H = 32;
+    const COLS = 24;
+
+    // Changeable without touching layout math.
+    const MAIN_ROWS = 13;
+
+    // Scratchpad row index is immediately after main rows
+    const SCRATCH_ROW = MAIN_ROWS;
+
+    const statusDiv = document.getElementById('status');
+    const gridRoot = document.getElementById('grid-root');
+    const gridEl = document.getElementById('grid');
+
+    // Compute centered offsets just like PMDG html:
+    // Grid width is 24 * 24 = 576, so x0 = (640-576)/2 = 32.
+    const GRID_W = COLS * CELL_W;
+    const GRID_X0 = Math.floor((CDU_W - GRID_W) / 2);
+
+    // Total rows rendered inside the grid: main + scratch = MAIN_ROWS + 1
+    const GRID_H = (MAIN_ROWS + 1) * CELL_H;
+    const GRID_Y0 = Math.floor((CDU_H - GRID_H) / 2);
+
+    // Place the grid at the centered offset
+    gridEl.style.left = GRID_X0 + 'px';
+    gridEl.style.top  = GRID_Y0 + 'px';
+
+    // WebSocket
+    const socket = new WebSocket('ws://localhost:8381/mcdu');
+
+    socket.onopen = () => {
+      statusDiv.textContent = 'Connected to C# Server';
+      statusDiv.style.color = 'lightgreen';
+    };
+
+    socket.onclose = () => {
+      statusDiv.textContent = 'Disconnected from C# Server';
+      statusDiv.style.color = 'red';
+    };
+
+    socket.onerror = () => {
+      statusDiv.textContent = 'Connection Error: Check Console';
+      statusDiv.style.color = 'red';
+    };
+
+    socket.onmessage = (event) => {
+      try { renderMCDU(JSON.parse(event.data)); }
+      catch (e) { console.error('Bad JSON:', e, event.data); }
+    };
+
+    function normalizeCell(cell, fallbackSize = 'normal') {
+      const text = (typeof cell?.text === 'string' && cell.text.length) ? cell.text : ' ';
+      const color = cell?.color || 'white';
+      const size = cell?.size || fallbackSize;
+      return { text, color, size };
+    }
+
+    function makeCellSpan(cell) {
+      const c = normalizeCell(cell);
+      const span = document.createElement('div');
+      span.className = `cell ${c.color} ${c.size}`;
+      span.textContent = c.text;
+      return span;
+    }
+
+    function renderRow24(rowCells) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'row';
+      for (let i = 0; i < COLS; i++) {
+        rowEl.appendChild(makeCellSpan(rowCells?.[i]));
+      }
+      return rowEl;
+    }
+
+    function blankRow(size = 'normal') {
+      const out = [];
+      for (let i = 0; i < COLS; i++) out.push({ text: ' ', color: 'white', size });
+      return out;
+    }
+
+    function renderMCDU(data) {
+      // Clear and re-render (simple and stable; you can optimize later)
+      gridEl.innerHTML = '';
+
+      // Main rows
+      if (Array.isArray(data?.Grid)) {
+        for (let r = 0; r < MAIN_ROWS; r++) {
+          const row = data.Grid[r] ?? blankRow((r % 2 === 0) ? 'small' : 'normal');
+          gridEl.appendChild(renderRow24(row));
         }
-    </script>
+      } else {
+        // If no Grid, still render empty so layout stays fixed
+        for (let r = 0; r < MAIN_ROWS; r++) {
+          gridEl.appendChild(renderRow24(blankRow((r % 2 === 0) ? 'small' : 'normal')));
+        }
+      }
+
+      // Scratchpad row
+      const scratchRow = Array.isArray(data?.Scratchpad) ? data.Scratchpad : blankRow('normal');
+      gridEl.appendChild(renderRow24(scratchRow));
+    }
+  </script>
 </body>
 </html>

@@ -14,7 +14,7 @@ using JonAvionics.providers;
 // --- Main Application Logic Starts Here ---
 
 // 1. AIRCRAFT SELECTION
-string aircraftType = "pmdg"; // Can be "fbw" or "pmdg"
+string aircraftType = "fbw"; // Can be "fbw" or "pmdg"
 
 // 2. WEBSOCKET SERVER SETUP
 GlobalServer.Wssv = new WebSocketServer("ws://0.0.0.0:8381");
