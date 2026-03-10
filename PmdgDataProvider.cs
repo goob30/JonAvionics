@@ -136,8 +136,9 @@ namespace JonAvionics.providers
                 var screenData = (PmdgCduScreen)data.dwData[0];
                 var processed = ProcessPmdgData(screenData);
                 var json = JsonConvert.SerializeObject(processed);
+                Console.WriteLine($"PMDG_OUT {Environment.TickCount64}");
 
-                Console.WriteLine($"PMDG Provider: CDU JSON (first 300 chars): {json[..Math.Min(json.Length, 300)]}");
+                // Console.WriteLine($"PMDG Provider: CDU JSON (first 300 chars): {json[..Math.Min(json.Length, 300)]}");
                 OnDataReceived?.Invoke(json);
             }
             catch (Exception ex)
@@ -205,7 +206,7 @@ namespace JonAvionics.providers
                 });
 
                 var rowText = new string(rowChars.ToArray());
-                Console.WriteLine($"PMDG Debug - Row {y:D2}: [{rowText}]");
+                // Console.WriteLine($"PMDG Debug - Row {y:D2}: [{rowText}]");
                 
             }
 
@@ -224,7 +225,7 @@ namespace JonAvionics.providers
             }
 
             var scratchText = new string(scratchChars.ToArray());
-            Console.WriteLine($"PMDG Debug - Scratchpad: [{scratchText}]");
+            // Console.WriteLine($"PMDG Debug - Scratchpad: [{scratchText}]");
 
             return new McduState
             {

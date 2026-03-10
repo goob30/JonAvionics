@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("JonAvionics")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7f7ee7e8db031abf65905b3bdf21d3f1766c71f1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fdcd6ba0c189950bc72384f5fddc6e2c4188ea32")]
 [assembly: System.Reflection.AssemblyProductAttribute("JonAvionics")]
 [assembly: System.Reflection.AssemblyTitleAttribute("JonAvionics")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

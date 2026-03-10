@@ -1,36 +1,36 @@
-﻿// file: Program.cs
-using System;
+﻿using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WebSocketSharp.Server;
 using JonAvionics;
 using JonAvionics.providers;
 
-// ===================================================================
-// === ALL TOP-LEVEL STATEMENTS (EXECUTABLE CODE) MUST COME FIRST ===
-// ===================================================================
+string aircraftType = "fbw"; // "fbw" or "pmdg"
 
-// --- Main Application Logic Starts Here ---
-
-// 1. AIRCRAFT SELECTION
-string aircraftType = "fbw"; // Can be "fbw" or "pmdg"
-
-// 2. WEBSOCKET SERVER SETUP
+// WebSocket server for local HTML preview
 GlobalServer.Wssv = new WebSocketServer("ws://0.0.0.0:8381");
 GlobalServer.Wssv.AddWebSocketService<McduDataBroadcaster>("/mcdu");
 GlobalServer.Wssv.Start();
-Console.WriteLine("Main Server: WebSocket server started on ws://localhost:8381");
+Console.WriteLine("Main Server: WebSocket server started on ws://0.0.0.0:8381");
 
-// 3. HTTP SERVER SETUP
+// Raw TCP JSON server for the Pi
+var tcpBroadcaster = new TcpJsonBroadcaster(8382);
+_ = Task.Run(() => tcpBroadcaster.StartAsync());
+Console.WriteLine("Main Server: TCP JSON server started on 0.0.0.0:8382");
+
+// HTTP server for browser preview
 var exePath = AppDomain.CurrentDomain.BaseDirectory;
 var frontendPath = Path.GetFullPath(Path.Combine(exePath, @"..\..\..\frontend"));
 string defaultHtmlFile = (aircraftType == "fbw") ? "mcdu_fbw.html" : "mcdu_pmdg.html";
 var httpFileServer = new HttpFileServer("http://localhost:8000/", frontendPath, defaultHtmlFile);
-// Start the HTTP server as a fire-and-forget background task
-Task.Run(() => httpFileServer.Start());
+_ = Task.Run(() => httpFileServer.Start());
 
-// 4. DATA PROVIDER SETUP
+// Provider setup
 IFmsDataProvider provider;
 if (aircraftType == "fbw")
 {
@@ -47,29 +47,42 @@ else if (aircraftType == "pmdg")
 else
 {
     Console.WriteLine($"Error: Unknown aircraft type '{aircraftType}'.");
-    // Wait for a key press so the user can see the error before exiting.
     Console.ReadKey();
     return;
 }
 
-// Subscribe to the provider's data event.
-provider.OnDataReceived += (jsonData) => {
-    // Use the ?. null-conditional operator for safety in a multithreaded environment
+// Queue-backed sender instead of polling latestJson
+var sendQueue = new McduSendQueue();
+
+// Provider callback: enqueue immediately
+provider.OnDataReceived += (jsonData) =>
+{
+    Console.WriteLine($"PROGRAM_IN {Environment.TickCount64}");
+
     GlobalServer.Wssv?.WebSocketServices["/mcdu"]?.Sessions.Broadcast(jsonData);
+    sendQueue.Enqueue(jsonData);
 };
-// Start the provider as a fire-and-forget background task
-Task.Run(() => provider.Start()); 
 
-// 5. KEEP APPLICATION ALIVE
+// Dedicated sender task
+_ = Task.Run(async () =>
+{
+    while (true)
+    {
+        string jsonData = await sendQueue.DequeueAsync();
+
+        Console.WriteLine($"TCP_SEND {Environment.TickCount64}");
+        tcpBroadcaster.BroadcastLine(jsonData);
+    }
+});
+
+// Start provider
+_ = Task.Run(() => provider.Start());
+
+// Keep app alive
 Console.WriteLine("All services started. The application is now running.");
-Console.WriteLine($"Navigate your browser to http://localhost:8000");
-// This blocks the main thread and keeps the application running until you press a key or Ctrl+C.
+Console.WriteLine("Browser preview: http://localhost:8000");
+Console.WriteLine("Pi TCP feed: tcp://<PC-IP>:8382");
 Console.ReadKey();
-
-
-// ============================================================================
-// === ALL TYPE DECLARATIONS (CLASSES) MUST COME AT THE END OF THE FILE      ===
-// ============================================================================
 
 public static class GlobalServer
 {
@@ -78,6 +91,105 @@ public static class GlobalServer
 
 public class McduDataBroadcaster : WebSocketBehavior
 {
-    // This class is intentionally empty for this implementation.
-    // WebSocketSharp uses it to create and manage sessions for the "/mcdu" path.
+}
+
+public sealed class McduSendQueue
+{
+    private readonly ConcurrentQueue<string> _queue = new();
+    private readonly SemaphoreSlim _signal = new(0);
+
+    public void Enqueue(string json)
+    {
+        _queue.Enqueue(json);
+        _signal.Release();
+    }
+
+    public async Task<string> DequeueAsync()
+    {
+        await _signal.WaitAsync();
+
+        while (true)
+        {
+            if (_queue.TryDequeue(out var item))
+                return item;
+        }
+    }
+}
+
+public class TcpJsonBroadcaster
+{
+    private readonly TcpListener _listener;
+    private readonly ConcurrentDictionary<TcpClient, byte> _clients = new();
+
+    public TcpJsonBroadcaster(int port)
+    {
+        _listener = new TcpListener(IPAddress.Any, port);
+    }
+
+    public async Task StartAsync()
+    {
+        _listener.Start();
+
+        while (true)
+        {
+            var client = await _listener.AcceptTcpClientAsync();
+            client.NoDelay = true;
+            _clients.TryAdd(client, 0);
+
+            _ = Task.Run(() => WatchClientAsync(client));
+            Console.WriteLine($"TCP client connected: {client.Client.RemoteEndPoint}");
+        }
+    }
+
+    private async Task WatchClientAsync(TcpClient client)
+    {
+        try
+        {
+            var stream = client.GetStream();
+            var buffer = new byte[1];
+
+            while (client.Connected)
+            {
+                int n = await stream.ReadAsync(buffer, 0, buffer.Length);
+                if (n <= 0) break;
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _clients.TryRemove(client, out _);
+            try { client.Close(); } catch { }
+            Console.WriteLine("TCP client disconnected.");
+        }
+    }
+
+    public void BroadcastLine(string line)
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(line + "\n");
+
+        foreach (var kv in _clients)
+        {
+            TcpClient client = kv.Key;
+
+            try
+            {
+                if (!client.Connected)
+                {
+                    _clients.TryRemove(client, out _);
+                    continue;
+                }
+
+                var stream = client.GetStream();
+                stream.Write(payload, 0, payload.Length);
+                stream.Flush();
+            }
+            catch
+            {
+                _clients.TryRemove(client, out _);
+                try { client.Close(); } catch { }
+            }
+        }
+    }
 }

@@ -10,52 +10,16 @@ using WebSocketSharp;
 
 namespace JonAvionics.providers
 {
-    // If these already exist elsewhere, remove duplicates here.
-    public class McduState
-    {
-        public string Title { get; set; } = "";              // kept, but title is also emitted as Grid[0]
-        public List<List<Cell>> Grid { get; set; } = new();   // Grid[0] = title row, Grid[1..12] = data rows
-        public List<Cell> Scratchpad { get; set; } = new();   // 24 cells
-        public List<Line> Lines { get; set; } = new();        // compatibility (unused)
-    }
-
-    public class Line
-    {
-        public List<Cell> Left { get; set; } = new();
-        public List<Cell> Center { get; set; } = new();
-        public List<Cell> Right { get; set; } = new();
-    }
-
-    public class Cell
-    {
-        public string text { get; set; }
-        public string color { get; set; }
-        public string size { get; set; }
-
-        public Cell(string t, string c, string s)
-        {
-            text = t;
-            color = c;
-            size = s;
-        }
-    }
-
     public class FbwDataProvider : IFmsDataProvider
     {
         public event Action<string>? OnDataReceived;
 
         private const string SimBridgeUri = "ws://localhost:8380/interfaces/v1/mcdu";
-
         private const int CDU_COLS = 24;
-
-        // Output format you asked for:
-        //   Grid[0]      = title row (normal)
-        //   Grid[1..12]  = 12 content rows
-        //   Scratchpad   = scratch row (normal)
         private const int TITLE_ROWS = 1;
         private const int CONTENT_ROWS = 12;
 
-        private const bool DEBUG_PRINT_ROWS = true;
+        private const bool DEBUG_PRINT_ROWS = false;
 
         private static readonly HashSet<string> ColorTags = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -102,13 +66,12 @@ namespace JonAvionics.providers
                                     : e.Data;
 
                                 var raw = JObject.Parse(jsonString);
-
-                                // FBW usually has "left" and "right"
                                 var mcduData = raw["left"];
                                 if (mcduData == null) return;
 
                                 var state = ProcessFbwData(mcduData);
                                 var finalJson = JsonConvert.SerializeObject(state);
+                                Console.WriteLine($"FBW_OUT {Environment.TickCount64}");
                                 OnDataReceived?.Invoke(finalJson);
                             }
                             catch (Exception ex)
@@ -135,7 +98,7 @@ namespace JonAvionics.providers
                         {
                             if (ws != null && ws.IsAlive) ws.Close();
                         }
-                        catch { /* ignore */ }
+                        catch { }
                     }
 
                     Console.WriteLine("FBW Provider: Will attempt to reconnect in 5 seconds...");
@@ -146,28 +109,24 @@ namespace JonAvionics.providers
 
         private McduState ProcessFbwData(JToken mcduData)
         {
-            // Keep Title string for compatibility/debug
             var rawTitleSegment = mcduData.Value<string>("title") ?? "";
             var plainTitle = Plain(rawTitleSegment).Trim();
             var titleRow = BuildCenteredTextRow(plainTitle, "white", "normal");
 
             var grid = new List<List<Cell>>(TITLE_ROWS + CONTENT_ROWS)
             {
-                titleRow // Grid[0] = title row
+                titleRow
             };
+
             if (DEBUG_PRINT_ROWS)
             {
                 Console.WriteLine($"FBW Raw Title: \"{rawTitleSegment}\"");
                 Console.WriteLine($"FBW Plain Title: \"{Plain(rawTitleSegment)}\"");
             }
 
-
-
-
             var linesParts = mcduData["lines"] as JArray;
             if (linesParts == null)
             {
-                // Still return title + blank rows so renderer stays stable
                 for (int i = 0; i < CONTENT_ROWS; i++)
                     grid.Add(EmptyRow((i % 2 == 0) ? "small" : "normal"));
 
@@ -180,7 +139,6 @@ namespace JonAvionics.providers
                 };
             }
 
-            // Render exactly 12 content rows (even if SimBridge gives fewer)
             for (int rowIdx = 0; rowIdx < CONTENT_ROWS; rowIdx++)
             {
                 var size = (rowIdx % 2 == 0) ? "small" : "normal";
@@ -201,15 +159,12 @@ namespace JonAvionics.providers
 
                 List<Cell> row;
 
-                // If seg1 & seg2 are empty, FBW sometimes encodes full spacing into seg0 using {sp}
                 if (!hasSeg1 && !hasSeg2)
                 {
                     row = FitTo24(ParseSegment(seg0, size), size);
                 }
                 else
                 {
-                    // Your corrected mapping:
-                    // seg0 = left, seg1 = right, seg2 = center (and seg2 may be blank)
                     row = EmptyRow(size);
 
                     var cells0 = ParseSegment(seg0, size);
@@ -246,7 +201,7 @@ namespace JonAvionics.providers
                 Title = plainTitle,
                 Grid = grid,
                 Scratchpad = scratch,
-                Lines = new List<Line>() // unused for FBW Grid mode
+                Lines = new List<Line>()
             };
         }
 
@@ -333,64 +288,38 @@ namespace JonAvionics.providers
         private static string Plain(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            s = s.Replace("{sp}", " ", StringComparison.OrdinalIgnoreCase);
-            return Regex.Replace(s, @"\{[\w/]*\}", "");
+            return Regex.Replace(s, @"\{[^}]+\}", "");
         }
 
-        private List<Cell> ParseSegment(string segment, string forceSize)
+        private static List<Cell> ParseSegment(string input, string size)
         {
             var cells = new List<Cell>();
-            var currentColor = "white";
-            var currentSize = forceSize;
+            if (string.IsNullOrEmpty(input)) return cells;
 
-            var matches = Regex.Matches(segment ?? "", @"(\{[\w/]*\})|([^\{]+)");
+            string color = "white";
+            int i = 0;
 
-            foreach (Match match in matches)
+            while (i < input.Length)
             {
-                if (match.Groups[1].Success)
+                if (input[i] == '{')
                 {
-                    var tag = match.Groups[1].Value.Trim('{', '}');
-
-                    // {sp} must emit an actual space cell
-                    if (tag.Equals("sp", StringComparison.OrdinalIgnoreCase))
+                    int end = input.IndexOf('}', i);
+                    if (end > i)
                     {
-                        cells.Add(new Cell(" ", currentColor, currentSize));
+                        var tag = input.Substring(i + 1, end - i - 1).Trim();
+
+                        if (ColorTags.Contains(tag))
+                            color = tag;
+                        else if (tag.Equals("sp", StringComparison.OrdinalIgnoreCase))
+                            cells.Add(new Cell(" ", color, size));
+
+                        i = end + 1;
                         continue;
                     }
-
-                    if (tag.Equals("end", StringComparison.OrdinalIgnoreCase))
-                    {
-                        currentColor = "white";
-                        currentSize = forceSize;
-                    }
-                    else if (tag.Equals("small", StringComparison.OrdinalIgnoreCase))
-                    {
-                        currentSize = "small";
-                    }
-                    else if (tag.Equals("big", StringComparison.OrdinalIgnoreCase))
-                    {
-                        currentSize = "normal";
-                    }
-                    else if (ColorTags.Contains(tag))
-                    {
-                        currentColor = tag.Equals("yellow", StringComparison.OrdinalIgnoreCase)
-                            ? "amber"
-                            : tag.ToLowerInvariant();
-                    }
-
-                    continue;
                 }
 
-                if (match.Groups[2].Success)
-                {
-                    var textRun = match.Groups[2].Value ?? "";
-
-                    // Normalize placeholder boxes
-                    textRun = textRun.Replace("[]", "□");
-
-                    foreach (var ch in textRun)
-                        cells.Add(new Cell(ch.ToString(), currentColor, currentSize));
-                }
+                cells.Add(new Cell(input[i].ToString(), color, size));
+                i++;
             }
 
             return cells;
