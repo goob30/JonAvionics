@@ -27,6 +27,7 @@
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"}
     ],
+
     [
       {"text":" ","color":"white","size":"small"},
       {"text":"E","color":"white","size":"small"},
@@ -53,6 +54,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":"L","color":"green","size":"normal"},
       {"text":"E","color":"green","size":"normal"},
@@ -79,6 +81,7 @@
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"}
     ],
+
     [
       {"text":" ","color":"white","size":"small"},
       {"text":"A","color":"white","size":"small"},
@@ -105,6 +108,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":" ","color":"cyan","size":"normal"},
       {"text":"2","color":"cyan","size":"normal"},
@@ -131,6 +135,7 @@
       {"text":"0","color":"green","size":"normal"},
       {"text":"1","color":"green","size":"normal"}
     ],
+
     [
       {"text":" ","color":"white","size":"small"},
       {"text":"S","color":"white","size":"small"},
@@ -157,6 +162,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"},
@@ -183,6 +189,7 @@
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"}
     ],
+
     [
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"},
@@ -209,6 +216,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"},
@@ -235,6 +243,7 @@
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"}
     ],
+
     [
       {"text":"C","color":"white","size":"small"},
       {"text":"H","color":"white","size":"small"},
@@ -261,6 +270,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":"[","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"},
@@ -287,6 +297,7 @@
       {"text":" ","color":"white","size":"normal"},
       {"text":" ","color":"white","size":"normal"}
     ],
+
     [
       {"text":"I","color":"white","size":"small"},
       {"text":"D","color":"white","size":"small"},
@@ -313,6 +324,7 @@
       {"text":" ","color":"white","size":"small"},
       {"text":" ","color":"white","size":"small"}
     ],
+
     [
       {"text":"+","color":"green","size":"normal"},
       {"text":"0","color":"green","size":"normal"},
@@ -368,3 +380,4 @@
     {"text":" ","color":"white","size":"normal"}
   ]
 }
+
