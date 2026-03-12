@@ -10,7 +10,10 @@ using WebSocketSharp.Server;
 using JonAvionics;
 using JonAvionics.providers;
 
-string aircraftType = "fbw"; // "fbw" or "pmdg"
+string aircraftType = "pmdg"; // "fbw" or "pmdg"
+string debugJsonFile = aircraftType == "fbw"
+    ? "debug_fbw.json"
+    : "debug_pmdg.json";
 
 // WebSocket server for local HTML preview
 GlobalServer.Wssv = new WebSocketServer("ws://0.0.0.0:8381");
@@ -71,6 +74,7 @@ _ = Task.Run(async () =>
         string jsonData = await sendQueue.DequeueAsync();
 
         Console.WriteLine($"TCP_SEND {Environment.TickCount64}");
+        File.WriteAllText(debugJsonFile, jsonData);
         tcpBroadcaster.BroadcastLine(jsonData);
     }
 });
